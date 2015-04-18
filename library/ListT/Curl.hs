@@ -12,19 +12,10 @@ import qualified Network.Curl as Curl
 import qualified ListT as L
 
 
-type Stream =
-  ListT IO ByteString
-
-type StreamHandler a =
-  Stream -> IO a
-
-type ConnectionError =
+type Error =
   Curl.CurlCode
 
-type Executor a =
-  StreamHandler a -> IO (Either ConnectionError a)
-
-urlExecutor :: String -> Executor a
+urlExecutor :: String -> (ListT IO ByteString -> IO a) -> IO (Either Error a)
 urlExecutor url handler =
   Curl.withCurlDo $ do
     h <- Curl.initialize
