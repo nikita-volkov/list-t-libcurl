@@ -16,7 +16,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
 import qualified Data.Pool as P
-import qualified Network.Curl as C
+import qualified Network.CURL720 as C
 import qualified ListT as L
 import qualified Language.Haskell.TH.Syntax as TH
 
@@ -28,60 +28,53 @@ import qualified Language.Haskell.TH.Syntax as TH
 -- there may only exist one per application, 
 -- hence the API provides no way to establish another pool.
 {-# NOINLINE pool #-}
-pool :: P.Pool C.Curl
+pool :: P.Pool C.CURL
 pool =
   unsafePerformIO $ P.createPool acquire release 1 30 100
   where
     acquire = do
-      h <- C.initialize
-      C.setopt h $ C.CurlFailOnError True
+      h <- C.curl_easy_init
+      C.curl_easy_setopt h [C.CURLOPT_FAILONERROR True]
       return h
-    release = const $ return ()
+    release h = do
+      C.curl_easy_cleanup h
 
 
 -- |
 -- A monad for sequential execution of \"libcurl\" operations.
 -- 
--- Intentionally prohibits the concurrent use due to the way the integration
--- with \"libcurl\" is handled.
+-- To execute multiple requests concurrently you need to run multiple sessions.
 newtype Session a =
-  Session (ReaderT C.Curl (EitherT Error IO) a)
+  Session (ReaderT C.CURL IO a)
   deriving (Functor, Applicative, Monad, MonadIO)
 
 type Error =
-  C.CurlCode
+  C.CURLE
 
 
 runSession :: Session a -> IO (Either Error a)
 runSession (Session m) =
-  P.withResource pool $ runEitherT . runReaderT m
+  try $
+  C.withlib C.CURL720 $
+  P.withResource pool $ 
+  runReaderT m
 
 consumeURL :: String -> (ListT IO ByteString -> IO a) -> Session a
 consumeURL url consumer =
-  Session $ ReaderT $ \h -> EitherT $ do
-    C.setDefaultSSLOpts h $ url
-    C.setopt h $ C.CurlURL url
-
+  Session $ ReaderT $ \h -> do
     producerMV <- newEmptyMVar
-    C.setopt h $ C.CurlWriteFunction $ chunkHandlerWriteFunction $ 
-      \b -> putMVar producerMV $ bool Nothing (Just b) $ not $ B.null b
+    C.curl_easy_setopt h
+      [
+        C.CURLOPT_WRITEFUNCTION $ Just (mVarWriteFunction producerMV),
+        C.CURLOPT_URL url
+      ]
+    C.curl_easy_perform h
 
-    C.perform h >>= \case
-      C.CurlOK -> do
-        result <- consumer $ L.fromMVar producerMV
-        return $ Right result
-      code -> do
-        return $ Left code
+    consumer $ L.fromMVar producerMV
 
-writeFunction :: ((Ptr Word8, Int) -> IO ()) -> C.WriteFunction
-writeFunction f src sz nelems _ = do
-  let n' = sz * nelems
-  f (castPtr src, fromIntegral n')
-  return n'
+mVarWriteFunction :: MVar (Maybe ByteString) -> C.CURL_write_callback
+mVarWriteFunction v b = do
+  putMVar v $ bool Nothing (Just b) $ not $ B.null b
+  return C.CURL_WRITEFUNC_OK
 
-chunkHandlerWriteFunction :: (ByteString -> IO ()) -> C.WriteFunction
-chunkHandlerWriteFunction handler =
-  writeFunction $ \(ptr, size) -> do
-    bs <- BU.unsafePackCStringFinalizer ptr size (free ptr)
-    handler bs
 
