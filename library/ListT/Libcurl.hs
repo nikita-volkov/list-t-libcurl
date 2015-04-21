@@ -13,6 +13,7 @@ import MTLPrelude hiding (Error)
 import Control.Monad.Trans.Either hiding (left, right)
 import ListT (ListT)
 import Data.ByteString (ByteString)
+import SlaveThread
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
 import qualified Data.Pool as P
@@ -68,13 +69,17 @@ consumeURL url consumer =
         C.CURLOPT_WRITEFUNCTION $ Just (mVarWriteFunction producerMV),
         C.CURLOPT_URL url
       ]
+    resultMV <- newEmptyMVar
+    fork $ do
+      putMVar resultMV =<< consumer (L.fromMVar producerMV)
     C.curl_easy_perform h
+    putMVar producerMV Nothing
+    takeMVar resultMV
 
-    consumer $ L.fromMVar producerMV
 
 mVarWriteFunction :: MVar (Maybe ByteString) -> C.CURL_write_callback
 mVarWriteFunction v b = do
-  putMVar v $ bool Nothing (Just b) $ not $ B.null b
+  putMVar v $ Just b
   return C.CURL_WRITEFUNC_OK
 
 
