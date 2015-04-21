@@ -64,7 +64,7 @@ consumeURL url consumer =
 
     producerMV <- newEmptyMVar
     C.setopt h $ C.CurlWriteFunction $ chunkHandlerWriteFunction $ 
-      \b -> putMVar producerMV $ bool Nothing (Just b) $ B.null b
+      \b -> putMVar producerMV $ bool Nothing (Just b) $ not $ B.null b
 
     C.perform h >>= \case
       C.CurlOK -> do
