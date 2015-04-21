@@ -1,4 +1,10 @@
-module ListT.Libcurl where
+module ListT.Libcurl
+(
+  Session,
+  runSession,
+  consumeURL,
+)
+where
 
 import BasePrelude hiding (cons, uncons)
 import Foreign hiding (Pool)
@@ -8,94 +14,68 @@ import ListT (ListT)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
-import qualified Data.Pool as DP
-import qualified Network.Curl as Curl
+import qualified Data.Pool as P
+import qualified Network.Curl as C
 import qualified ListT as L
 import qualified Language.Haskell.TH.Syntax as TH
 
 
-newtype Pool s =
-  Pool (DP.Pool Curl.Curl)
-
-usePool :: PoolSettings -> (forall s. ReaderT (Pool s) IO a) -> IO a
-usePool (PoolSettings size timeout) m =
-  Curl.withCurlDo $ bracket acquire release $ runReaderT m . Pool
+-- |
+-- A global sessions pool.
+-- 
+-- Due to how the \"libcurl\" library integration is handled,
+-- there may only exist one per application, 
+-- hence the API provides no way to establish another pool.
+{-# NOINLINE pool #-}
+pool :: P.Pool C.Curl
+pool =
+  unsafePerformIO $ P.createPool acquire release 1 30 100
   where
-    acquire =
-      DP.createPool Curl.initialize (const (return ())) 1 (fromIntegral timeout) size
-    release pool =
-      DP.destroyAllResources pool
+    acquire = do
+      h <- C.initialize
+      C.setopt h $ C.CurlFailOnError True
+      return h
+    release = const $ return ()
 
 
 -- |
--- Settings of a pool.
-data PoolSettings =
-  PoolSettings !Int !Int
-  deriving (Show)
-
-instance TH.Lift PoolSettings where
-  lift (PoolSettings a b) = 
-    [|PoolSettings a b|]
-
--- | 
--- A smart constructor for pool settings.
-poolSettings :: 
-  Int
-  -- ^
-  -- The maximum number of connections to keep open. 
-  -- The smallest acceptable value is 1.
-  -- Requests for connections will block if this limit is reached.
-  -> 
-  Int
-  -- ^
-  -- The amount of seconds for which an unused connection is kept open. 
-  -- The smallest acceptable value is 1.
-  -> 
-  Maybe PoolSettings
-  -- ^
-  -- Maybe pool settings, if they are correct.
-poolSettings size timeout =
-  if size > 0 && timeout >= 1
-    then Just $ PoolSettings size timeout
-    else Nothing
-
-
--- |
--- Presented as a specialised monad to prohibit the concurrent use of a single session handle.
+-- A monad for sequential execution of \"libcurl\" operations.
+-- 
+-- Intentionally prohibits the concurrent use due to the way the integration
+-- with \"libcurl\" is handled.
 newtype Session a =
-  Session (ReaderT Curl.Curl IO a)
+  Session (ReaderT C.Curl IO a)
   deriving (Functor, Applicative, Monad, MonadIO)
 
-runSession :: Session a -> ReaderT (Pool s) IO a
+
+runSession :: Session a -> IO a
 runSession (Session m) =
-  ReaderT $ \(Pool pool) -> DP.withResource pool $ runReaderT m
+  P.withResource pool $ runReaderT m
 
-
-urlExecutor :: String -> (ListT IO ByteString -> IO a) -> Session (Either Curl.CurlCode a)
-urlExecutor url handler =
+consumeURL :: String -> (ListT IO ByteString -> IO a) -> Session (Either C.CurlCode a)
+consumeURL url consumer =
   Session $ ReaderT $ \h -> do
-    Curl.setopt h $ Curl.CurlFailOnError True
-    Curl.setDefaultSSLOpts h $ url
-    Curl.setopt h $ Curl.CurlURL url
+    C.setDefaultSSLOpts h $ url
+    C.setopt h $ C.CurlURL url
 
     producerMV <- newEmptyMVar
-    Curl.setopt h $ Curl.CurlWriteFunction $ chunkHandlerWriteFunction $ 
+    C.setopt h $ C.CurlWriteFunction $ chunkHandlerWriteFunction $ 
       \b -> putMVar producerMV $ bool Nothing (Just b) $ B.null b
 
-    Curl.perform h >>= \case
-      Curl.CurlOK -> do
-        result <- handler $ L.fromMVar producerMV
+    C.perform h >>= \case
+      C.CurlOK -> do
+        result <- consumer $ L.fromMVar producerMV
         return $ Right result
       code -> do
         return $ Left code
 
-writeFunction :: ((Ptr Word8, Int) -> IO ()) -> Curl.WriteFunction
+writeFunction :: ((Ptr Word8, Int) -> IO ()) -> C.WriteFunction
 writeFunction f src sz nelems _ = do
-    let n' = sz * nelems
-    f (castPtr src, fromIntegral n')
-    return n'
+  let n' = sz * nelems
+  f (castPtr src, fromIntegral n')
+  return n'
 
-chunkHandlerWriteFunction :: (ByteString -> IO ()) -> Curl.WriteFunction
+chunkHandlerWriteFunction :: (ByteString -> IO ()) -> C.WriteFunction
 chunkHandlerWriteFunction handler =
   writeFunction $ \(ptr, size) -> do
     bs <- BU.unsafePackCStringFinalizer ptr size (free ptr)
