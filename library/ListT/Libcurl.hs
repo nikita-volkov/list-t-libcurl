@@ -1,6 +1,7 @@
 module ListT.Libcurl
 (
   Session,
+  Error,
   runSession,
   consumeURL,
 )
@@ -44,17 +45,20 @@ pool =
 -- Intentionally prohibits the concurrent use due to the way the integration
 -- with \"libcurl\" is handled.
 newtype Session a =
-  Session (ReaderT C.Curl IO a)
+  Session (ReaderT C.Curl (EitherT Error IO) a)
   deriving (Functor, Applicative, Monad, MonadIO)
 
+type Error =
+  C.CurlCode
 
-runSession :: Session a -> IO a
+
+runSession :: Session a -> IO (Either Error a)
 runSession (Session m) =
-  P.withResource pool $ runReaderT m
+  P.withResource pool $ runEitherT . runReaderT m
 
-consumeURL :: String -> (ListT IO ByteString -> IO a) -> Session (Either C.CurlCode a)
+consumeURL :: String -> (ListT IO ByteString -> IO a) -> Session a
 consumeURL url consumer =
-  Session $ ReaderT $ \h -> do
+  Session $ ReaderT $ \h -> EitherT $ do
     C.setDefaultSSLOpts h $ url
     C.setopt h $ C.CurlURL url
 
