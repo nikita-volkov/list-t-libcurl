@@ -1,5 +1,5 @@
 name:
-  list-t-curl
+  list-t-libcurl
 version:
   0.1.0.0
 synopsis:
@@ -7,9 +7,9 @@ description:
 category:
   Streaming, HTTP
 homepage:
-  https://github.com/nikita-volkov/list-t-curl
+  https://github.com/nikita-volkov/list-t-libcurl
 bug-reports:
-  https://github.com/nikita-volkov/list-t-curl/issues 
+  https://github.com/nikita-volkov/list-t-libcurl/issues 
 author:
   Nikita Volkov <nikita.y.volkov@mail.ru>
 maintainer:
@@ -30,7 +30,7 @@ source-repository head
   type:
     git
   location:
-    git://github.com/nikita-volkov/list-t-curl.git
+    git://github.com/nikita-volkov/list-t-libcurl.git
 
 
 library
@@ -38,7 +38,7 @@ library
     library
   other-modules:
   exposed-modules:
-    ListT.Curl
+    ListT.Libcurl
   ghc-options:
     -funbox-strict-fields
   default-extensions:

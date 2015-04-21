@@ -1,4 +1,4 @@
-module ListT.Curl where
+module ListT.Libcurl where
 
 import BasePrelude hiding (cons, uncons)
 import Foreign hiding (Pool)
