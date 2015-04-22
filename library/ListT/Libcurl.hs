@@ -8,11 +8,12 @@ module ListT.Libcurl
 where
 
 import BasePrelude hiding (cons, uncons)
-import Foreign hiding (Pool)
+import Foreign hiding (Pool, void)
 import MTLPrelude hiding (Error)
 import Control.Monad.Trans.Either hiding (left, right)
 import ListT (ListT)
 import Data.ByteString (ByteString)
+import Control.Concurrent.STM.TMVar
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
 import qualified Data.Pool as P
@@ -62,22 +63,47 @@ runSession (Session m) =
 consumeURL :: String -> (ListT IO ByteString -> IO a) -> Session a
 consumeURL url consumer =
   Session $ ReaderT $ \h -> do
-    producerMV <- newEmptyMVar
+    syncState@(active, chunk) <- atomically $ newSyncState
     C.curl_easy_setopt h
       [
-        C.CURLOPT_WRITEFUNCTION $ Just (mVarWriteFunction producerMV),
+        C.CURLOPT_WRITEFUNCTION $ Just (syncWriteFunction syncState),
         C.CURLOPT_URL url
       ]
-    resultMV <- newEmptyMVar
+    result <- newEmptyMVar :: IO (MVar (Either SomeException a))
     forkIO $ do
-      putMVar resultMV =<< try (consumer (L.fromMVar producerMV))
-    C.curl_easy_perform h
-    putMVar producerMV Nothing
-    either (throwIO :: SomeException -> IO a) return =<< takeMVar resultMV
+      r <- 
+        try $ consumer $ fix $ \loop -> do
+          chunk <- 
+            lift $ atomically $
+              tryTakeTMVar chunk >>= \case
+                Just chunk -> return $ Just chunk
+                _ -> readTVar active >>= \case
+                  False -> return Nothing
+                  _ -> retry
+          case chunk of
+            Nothing -> mzero
+            Just chunk -> L.cons chunk loop
+      atomically $ writeTVar active False
+      putMVar result r
+    catch (C.curl_easy_perform h) $ \case
+      C.CURLE _ _ _ C.CURLE_WRITE_ERROR -> return ()
+      e -> throwIO e
+    atomically $ writeTVar active False
+    either (throwIO :: SomeException -> IO a) return =<< takeMVar result
 
-mVarWriteFunction :: MVar (Maybe ByteString) -> C.CURL_write_callback
-mVarWriteFunction v b = do
-  putMVar v $ Just b
-  return C.CURL_WRITEFUNC_OK
+
+type SyncState =
+  (TVar Bool, TMVar ByteString)
+
+newSyncState :: STM SyncState
+newSyncState =
+  (,) <$> newTVar True <*> newEmptyTMVar
+
+syncWriteFunction :: SyncState -> C.CURL_write_callback
+syncWriteFunction (active, chunk) b = 
+  atomically $ do
+    readTVar active >>= \case
+      False -> return C.CURL_WRITEFUNC_FAIL
+      True -> putTMVar chunk b >> return C.CURL_WRITEFUNC_OK
 
 
