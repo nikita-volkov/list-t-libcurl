@@ -19,7 +19,6 @@ import qualified Data.ByteString.Unsafe as BU
 import qualified Data.Pool as P
 import qualified Network.CURL720 as C
 import qualified ListT as L
-import qualified Language.Haskell.TH.Syntax as TH
 
 
 -- |
