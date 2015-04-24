@@ -30,7 +30,9 @@ import qualified ListT as L
 {-# NOINLINE pool #-}
 pool :: P.Pool C.CURL
 pool =
-  unsafePerformIO $ P.createPool acquire release 1 30 100
+  unsafePerformIO $ do
+    C.loadlib C.CURL720
+    P.createPool acquire release 1 30 100
   where
     acquire = do
       h <- C.curl_easy_init
@@ -55,7 +57,6 @@ type Error =
 runSession :: Session a -> IO (Either Error a)
 runSession (Session m) =
   try $
-  C.withlib C.CURL720 $
   P.withResource pool $ 
   runReaderT m
 
