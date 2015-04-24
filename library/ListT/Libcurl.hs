@@ -71,17 +71,12 @@ consumeURL url consumer =
     result <- newEmptyMVar :: IO (MVar (Either SomeException a))
     forkIO $ do
       r <- 
-        try $ consumer $ fix $ \loop -> do
-          chunk <- 
-            lift $ atomically $
-              tryTakeTMVar chunk >>= \case
-                Just chunk -> return $ Just chunk
-                _ -> readTVar active >>= \case
-                  False -> return Nothing
-                  _ -> retry
-          case chunk of
-            Nothing -> mzero
-            Just chunk -> L.cons chunk loop
+        try $ consumer $ fix $ \loop -> join $ lift $ atomically $
+          tryTakeTMVar chunk >>= \case
+            Just chunk -> return $ L.cons chunk loop
+            _ -> readTVar active >>= \case
+              False -> return mzero
+              _ -> retry
       atomically $ writeTVar active False
       putMVar result r
     catch (C.curl_easy_perform h) $ \case
