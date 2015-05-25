@@ -66,7 +66,8 @@ consumeURL url consumer =
     C.curl_easy_setopt h
       [
         C.CURLOPT_WRITEFUNCTION $ Just (syncWriteFunction syncState),
-        C.CURLOPT_URL url
+        C.CURLOPT_URL url,
+        C.CURLOPT_FOLLOWLOCATION True
       ]
     result <- newEmptyMVar :: IO (MVar (Either SomeException a))
     forkIO $ do
