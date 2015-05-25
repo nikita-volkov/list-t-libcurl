@@ -48,7 +48,7 @@ library
   build-depends:
     resource-pool == 0.2.*,
     stm == 2.*,
-    curlhs == 0.1.*,
+    curlhs >= 0.1.6 && < 0.2,
 
     bytestring >= 0.10 && < 0.11,
 
