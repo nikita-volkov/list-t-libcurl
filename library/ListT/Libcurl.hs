@@ -36,7 +36,6 @@ pool =
   where
     acquire = do
       h <- C.curl_easy_init
-      C.curl_easy_setopt h [C.CURLOPT_FAILONERROR True]
       return h
     release h = do
       C.curl_easy_cleanup h
