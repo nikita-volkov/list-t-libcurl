@@ -1,7 +1,7 @@
 name:
   list-t-libcurl
 version:
-  0.2.0.2
+  0.3.0.0
 synopsis:
   A "libcurl"-based streaming HTTP client
 category:
