@@ -10,7 +10,6 @@ where
 import BasePrelude hiding (cons, uncons)
 import Foreign hiding (Pool, void, unsafePerformIO)
 import MTLPrelude hiding (Error)
-import Control.Monad.Trans.Either hiding (left, right)
 import ListT (ListT)
 import Data.ByteString (ByteString)
 import Control.Concurrent.STM.TMVar
